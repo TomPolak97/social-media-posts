@@ -24,6 +24,18 @@ class PostCreate(BaseModel):
     tags: Optional[str] = None
     location: Optional[str] = None
 
+class PostUpdate(BaseModel):
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    email: Optional[str] = None
+    company: Optional[str] = None
+    job_title: Optional[str] = None
+    text: Optional[str] = None
+    category: Optional[str] = None
+    svg_image: Optional[str] = None
+    tags: Optional[str] = None
+    location: Optional[str] = None
+
 @router.get("/posts")
 def get_posts(
     page: int = 1,
@@ -139,7 +151,7 @@ def get_posts(
                 }
             })
         
-        logging.info(f"Retrieved {len(posts)} posts (page {page}/{total_pages}, total: {total})")
+        logging.debug(f"Retrieved {len(posts)} posts (page {page}/{total_pages}, total: {total})")
         
         return {
             "posts": posts,
@@ -283,6 +295,109 @@ def create_post(post_data: PostCreate):
         raise HTTPException(status_code=400, detail=f"Database error: {str(e)}")
     except Exception as e:
         logging.error(f"Error creating post: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@router.put("/posts/{post_id}")
+def update_post(post_id: int, post_data: PostUpdate):
+    """Update an existing post - direct SQLite update"""
+    try:
+        conn = create_connection()
+        if conn is None:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        
+        c = conn.cursor()
+        
+        # Check if post exists
+        c.execute("SELECT id, author_id FROM posts WHERE id = ?", (post_id,))
+        post_row = c.fetchone()
+        
+        if not post_row:
+            raise HTTPException(status_code=404, detail=f"Post with ID {post_id} not found")
+        
+        author_id = post_row[1]
+        
+        # Update author if author fields are provided
+        # In Pydantic: None = field not provided, empty string = field provided but empty
+        author_update_fields = []
+        author_update_values = []
+        
+        if post_data.first_name is not None:
+            author_update_fields.append("first_name = ?")
+            author_update_values.append(post_data.first_name)
+        if post_data.last_name is not None:
+            author_update_fields.append("last_name = ?")
+            author_update_values.append(post_data.last_name)
+        if post_data.email is not None:
+            # Check if email is already used by another author (only if email is being changed)
+            c.execute("SELECT email FROM authors WHERE id = ?", (author_id,))
+            current_email = c.fetchone()
+            if current_email and current_email[0] != post_data.email:
+                c.execute("SELECT id FROM authors WHERE email = ? AND id != ?", (post_data.email, author_id))
+                if c.fetchone():
+                    raise HTTPException(status_code=400, detail="Email already exists for another author")
+            author_update_fields.append("email = ?")
+            author_update_values.append(post_data.email)
+        if post_data.company is not None:
+            # Empty string means clear the field (set to NULL)
+            author_update_fields.append("company = ?")
+            author_update_values.append(post_data.company if post_data.company else None)
+        if post_data.job_title is not None:
+            # Empty string means clear the field (set to NULL)
+            author_update_fields.append("job_title = ?")
+            author_update_values.append(post_data.job_title if post_data.job_title else None)
+        
+        if author_update_fields:
+            author_update_values.append(author_id)
+            c.execute(f"""
+                UPDATE authors 
+                SET {', '.join(author_update_fields)}
+                WHERE id = ?
+            """, author_update_values)
+        
+        # Update post fields
+        post_update_fields = []
+        post_update_values = []
+        
+        if post_data.text is not None:
+            post_update_fields.append("text = ?")
+            post_update_values.append(post_data.text)
+        if post_data.category is not None:
+            # Empty string means clear the field (set to NULL)
+            post_update_fields.append("category = ?")
+            post_update_values.append(post_data.category if post_data.category else None)
+        if post_data.svg_image is not None:
+            # Empty string means clear the field (set to NULL)
+            post_update_fields.append("svg_image = ?")
+            post_update_values.append(post_data.svg_image if post_data.svg_image else None)
+        if post_data.tags is not None:
+            # Empty string means clear the field (set to NULL)
+            post_update_fields.append("tags = ?")
+            post_update_values.append(post_data.tags if post_data.tags else None)
+        if post_data.location is not None:
+            # Empty string means clear the field (set to NULL)
+            post_update_fields.append("location = ?")
+            post_update_values.append(post_data.location if post_data.location else None)
+        
+        if post_update_fields:
+            post_update_values.append(post_id)
+            c.execute(f"""
+                UPDATE posts 
+                SET {', '.join(post_update_fields)}
+                WHERE id = ?
+            """, post_update_values)
+        
+        conn.commit()
+        logging.info(f"Post {post_id} updated successfully")
+        
+        return {
+            "message": "Post updated successfully",
+            "id": post_id
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error updating post: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 

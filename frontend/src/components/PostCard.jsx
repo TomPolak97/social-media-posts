@@ -1,6 +1,10 @@
+import { useState } from "react";
 import axios from "axios";
+import PostForm from "./PostForm";
 
 export default function PostCard({ post, fetchPosts, onSuccess, onError }) {
+  const [showEditForm, setShowEditForm] = useState(false);
+
   const handleDelete = async () => {
     // Confirm deletion
     const confirmed = window.confirm(
@@ -211,8 +215,19 @@ export default function PostCard({ post, fetchPosts, onSuccess, onError }) {
       {/* Action buttons */}
       <div className="post-actions">
         <button onClick={handleDelete} title="Delete">🗑️</button>
-        <button title="Edit">✏️</button>
+        <button onClick={() => setShowEditForm(true)} title="Edit">✏️</button>
       </div>
+
+      {/* Edit Form Modal */}
+      {showEditForm && (
+        <PostForm
+          closeForm={() => setShowEditForm(false)}
+          fetchPosts={fetchPosts}
+          onSuccess={onSuccess}
+          post={post}
+          isEdit={true}
+        />
+      )}
     </div>
   );
 }
