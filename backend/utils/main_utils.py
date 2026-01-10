@@ -7,12 +7,16 @@ including CORS setup, route registration, and server startup logic.
 
 import logging
 import sys
+import os
 from typing import List
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from ..posts_routes import router as posts_router
+# Add parent directory to path to allow importing posts_routes
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from posts_routes import router as posts_router
 
 # Configure module-level logger
 _logger = logging.getLogger(__name__)

@@ -5,7 +5,7 @@ import sqlite3
 import logging
 from datetime import datetime
 from db import create_connection
-from backend.utils.posts_routes_utils import (
+from utils.posts_routes_utils import (
     build_where_clause,
     get_order_by_clause,
     row_to_post_dict,
@@ -85,7 +85,7 @@ def get_posts(
         conn = create_connection()
         if conn is None:
             raise HTTPException(status_code=500, detail="Database connection failed")
-        
+
         c = conn.cursor()
         
         # Build WHERE clause and ORDER BY clause using utilities

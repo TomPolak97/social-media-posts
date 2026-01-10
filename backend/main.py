@@ -19,7 +19,7 @@ logging.basicConfig(
 
 from db import create_tables
 from import_csv import import_csv
-from backend.utils.main_utils import configure_application, should_use_reload, start_server
+from utils.main_utils import configure_application, should_use_reload, start_server
 
 # Configure module-level logger
 _logger = logging.getLogger(__name__)
@@ -90,10 +90,10 @@ configure_application(app)
 def main() -> None:
     """
     Main entry point for running the application server.
-    
+
     Determines reload mode and starts the uvicorn server.
     This function is called when the script is executed directly.
-    
+
     Logs:
         INFO: Server configuration and startup
     """
