@@ -12,7 +12,7 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from posts_routes import router as posts_router
+from ..posts_routes import router as posts_router
 
 # Configure module-level logger
 _logger = logging.getLogger(__name__)

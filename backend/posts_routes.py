@@ -5,7 +5,7 @@ import sqlite3
 import logging
 from datetime import datetime
 from db import create_connection
-from posts_routes_utils import (
+from backend.utils.posts_routes_utils import (
     build_where_clause,
     get_order_by_clause,
     row_to_post_dict,

@@ -9,9 +9,17 @@ from fastapi import FastAPI
 from contextlib import asynccontextmanager
 import logging
 
+# Configure logging for the entire application FIRST, before any other imports that use logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    force=True  # Override any existing configuration
+)
+
 from db import create_tables
 from import_csv import import_csv
-from main_utils import configure_application, should_use_reload, start_server
+from backend.utils.main_utils import configure_application, should_use_reload, start_server
 
 # Configure module-level logger
 _logger = logging.getLogger(__name__)
