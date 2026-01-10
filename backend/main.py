@@ -1,55 +1,98 @@
+"""
+Main FastAPI application entry point.
+
+This module initializes the FastAPI application, sets up database tables,
+imports CSV data, and starts the server.
+"""
+
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from posts_routes import router as posts_router
+from contextlib import asynccontextmanager
+import logging
+
 from db import create_tables
 from import_csv import import_csv
-import logging
-from contextlib import asynccontextmanager
+from main_utils import configure_application, should_use_reload, start_server
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+# Configure module-level logger
+_logger = logging.getLogger(__name__)
 
-# Lifespan event for startup/shutdown
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logging.info("Application starting up...")
-    create_tables()
-    import_csv()
-    logging.info("Startup complete.")
+    """
+    Lifespan context manager for FastAPI application startup and shutdown.
+    
+    Handles:
+    - Database table creation
+    - CSV data import
+    - Application startup/shutdown logging
+    
+    Yields:
+        Control to the application runtime
+        
+    Logs:
+        INFO: Startup and shutdown events
+        ERROR: Startup failures
+    """
+    _logger.info("=" * 50)
+    _logger.info("Application starting up...")
+    _logger.info("=" * 50)
+    
+    try:
+        # Initialize database tables
+        _logger.info("Initializing database tables...")
+        create_tables()
+        _logger.info("Database tables initialized successfully")
+        
+        # Import CSV data if available
+        _logger.info("Checking for CSV data import...")
+        import_csv()
+        _logger.info("CSV import process completed")
+        
+        _logger.info("=" * 50)
+        _logger.info("Startup complete. Application is ready to serve requests.")
+        _logger.info("=" * 50)
+        
+    except Exception as e:
+        _logger.error(f"Error during application startup: {e}", exc_info=True)
+        raise
+    
+    # Yield control to the application
     yield
-    logging.info("Application shutting down...")
+    
+    # Shutdown handling
+    _logger.info("=" * 50)
+    _logger.info("Application shutting down...")
+    _logger.info("=" * 50)
 
-app = FastAPI(lifespan=lifespan)
 
-# Enable CORS for frontend
-origins = ["http://localhost:5173", "http://127.0.0.1:5173"]
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+# Create FastAPI application instance
+_logger.debug("Initializing FastAPI application...")
+app = FastAPI(
+    title="Social Media Posts API",
+    description="API for managing social media posts with filtering, pagination, and CRUD operations",
+    version="1.0.0",
+    lifespan=lifespan
 )
 
-@app.get("/health")
-def health():
-    return {"status": "ok"}
+# Configure application (middleware and routes)
+configure_application(app)
 
-# Include posts endpoints
-app.include_router(posts_router)
+
+def main() -> None:
+    """
+    Main entry point for running the application server.
+    
+    Determines reload mode and starts the uvicorn server.
+    This function is called when the script is executed directly.
+    
+    Logs:
+        INFO: Server configuration and startup
+    """
+    use_reload = should_use_reload()
+    start_server(app, use_reload)
+
 
 # Run the server if this file is executed directly
 if __name__ == "__main__":
-    import uvicorn
-    import os
-    import sys
-    
-    # Disable reload when running in PyCharm debugger or when explicitly requested
-    # Reload doesn't work well with debuggers
-    use_reload = "--no-reload" not in sys.argv and "pydevd" not in sys.modules
-    
-    if use_reload:
-        # Use import string format for reload to work
-        uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
-    else:
-        # Direct app object when not using reload (works better with debuggers)
-        uvicorn.run(app, host="0.0.0.0", port=8000, reload=False)
+    main()
