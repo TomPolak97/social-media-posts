@@ -39,13 +39,20 @@ export default function PostForm({ closeForm, fetchPosts, onSuccess }) {
         category: category || null
       };
 
-      await axios.post("http://127.0.0.1:8000/posts", postData);
-      fetchPosts();
-      closeForm();
+      const response = await axios.post("http://127.0.0.1:8000/posts", postData);
       
-      // Show success notification
+      // Show success notification first
       if (onSuccess) {
         onSuccess("Post added successfully! ✓");
+      }
+      
+      // Close form
+      closeForm();
+      
+      // Refresh posts (pass true to reset to page 1 for new posts)
+      // New posts are typically most recent, so they'll be on page 1
+      if (fetchPosts) {
+        fetchPosts(true);
       }
     } catch (err) {
       console.error("Add post failed:", err);

@@ -274,6 +274,25 @@ body {
   flex-grow: 1;
 }
 
+/* Post stats - likes, comments, engagements */
+.post-card .post-stats {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 16px;
+  padding: 12px 0;
+  border-top: 1px solid #eee;
+  border-bottom: 1px solid #eee;
+  font-size: 0.9rem;
+  color: #666;
+}
+
+.post-card .post-stats span {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 500;
+}
+
 /* Post actions */
 .post-card .post-actions {
   display: flex;
@@ -281,7 +300,6 @@ body {
   justify-content: flex-end;
   margin-top: auto;
   padding-top: 12px;
-  border-top: 1px solid #eee;
 }
 
 .post-card .post-actions button {

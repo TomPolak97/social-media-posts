@@ -13,11 +13,15 @@ export default function PostCard({ post, fetchPosts, onSuccess, onError }) {
 
     try {
       await axios.delete(`http://127.0.0.1:8000/posts/${post.id}`);
-      fetchPosts();
       
-      // Show success notification
+      // Show success notification first
       if (onSuccess) {
         onSuccess("Post deleted successfully! ✓");
+      }
+      
+      // Refresh posts (pass false to stay on current page)
+      if (fetchPosts) {
+        fetchPosts(false);
       }
     } catch (err) {
       console.error("Delete failed:", err);
@@ -196,6 +200,13 @@ export default function PostCard({ post, fetchPosts, onSuccess, onError }) {
       
       {/* Post text */}
       <div className="post-text">{postText}</div>
+      
+      {/* Post stats - likes, comments, engagements */}
+      <div className="post-stats">
+        <span>👍 {post.likes || 0}</span>
+        <span>💬 {post.comments || 0}</span>
+        <span>📊 {post.total_engagements || 0}</span>
+      </div>
       
       {/* Action buttons */}
       <div className="post-actions">

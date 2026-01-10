@@ -1,16 +1,51 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import axios from "axios";
 import PostForm from "./PostForm";
 
-export default function Header({ posts, fetchPosts, onSuccess }) {
+export default function Header({ fetchPosts, onSuccess }) {
   const [showForm, setShowForm] = useState(false);
+  const [stats, setStats] = useState({
+    total_posts: 0,
+    total_likes: 0,
+    total_comments: 0,
+    avg_engagement_rate: 0
+  });
 
-  const totalPosts = posts.length;
-  const totalLikes = posts.reduce((sum, p) => sum + (p.likes || 0), 0);
-  const totalComments = posts.reduce((sum, p) => sum + (p.comments || 0), 0);
-  // Average engagement rate - engagement_rate is already a percentage
-  const avgEngagement = totalPosts
-    ? (posts.reduce((sum, p) => sum + (p.engagement_rate || 0), 0) / totalPosts).toFixed(1)
-    : 0;
+  const fetchStats = async () => {
+    try {
+      const res = await axios.get("http://127.0.0.1:8000/posts/stats");
+      setStats(res.data);
+    } catch (err) {
+      console.error("Error fetching stats:", err);
+    }
+  };
+
+  useEffect(() => {
+    fetchStats();
+    
+    // Listen for stats refresh events (triggered after add/delete operations)
+    const handleStatsRefresh = () => {
+      fetchStats();
+    };
+    
+    window.addEventListener('refreshStats', handleStatsRefresh);
+    
+    return () => {
+      window.removeEventListener('refreshStats', handleStatsRefresh);
+    };
+  }, []);
+
+  // Refresh posts when fetchPosts is called (after add/delete operations)
+  const handleRefresh = async (resetPage = false) => {
+    if (fetchPosts) {
+      await fetchPosts(resetPage);
+    }
+  };
+
+  const totalPosts = stats.total_posts || 0;
+  const totalLikes = stats.total_likes || 0;
+  const totalComments = stats.total_comments || 0;
+  const avgEngagement = stats.avg_engagement_rate || 0;
 
   // Format large numbers
   const formatNumber = (num) => {
@@ -60,7 +95,7 @@ export default function Header({ posts, fetchPosts, onSuccess }) {
       {showForm && (
         <PostForm 
           closeForm={() => setShowForm(false)} 
-          fetchPosts={fetchPosts}
+          fetchPosts={handleRefresh}
           onSuccess={onSuccess}
         />
       )}

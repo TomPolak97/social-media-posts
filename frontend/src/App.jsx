@@ -9,6 +9,8 @@ import Toast from "./components/Toast";
 function App() {
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [totalPages, setTotalPages] = useState(1);
+  const [total, setTotal] = useState(0);
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("All Categories");
   const [dateFrom, setDateFrom] = useState("");
@@ -31,88 +33,63 @@ function App() {
   const fetchPosts = async () => {
     try {
       setLoading(true);
-      const res = await axios.get("http://127.0.0.1:8000/posts");
-      setPosts(res.data);
+      
+      // Build query parameters
+      const params = new URLSearchParams({
+        page: page.toString(),
+        per_page: POSTS_PER_PAGE.toString(),
+        sort_by: sortBy,
+      });
+      
+      if (search) params.append("search", search);
+      if (category && category !== "All Categories") params.append("category", category);
+      if (dateFrom) params.append("date_from", dateFrom);
+      if (dateTo) params.append("date_to", dateTo);
+      if (firstName) params.append("first_name", firstName);
+      if (lastName) params.append("last_name", lastName);
+      
+      const res = await axios.get(`http://127.0.0.1:8000/posts?${params.toString()}`);
+      
+      setPosts(res.data.posts || []);
+      setTotalPages(res.data.total_pages || 1);
+      setTotal(res.data.total || 0);
     } catch (err) {
-      console.error(err);
+      console.error("Error fetching posts:", err);
+      setPosts([]);
+      setTotalPages(1);
+      setTotal(0);
     } finally {
       setLoading(false);
     }
   };
+  
+  // Refresh function for add/delete operations - refreshes both posts and triggers stats refresh
+  const refreshAll = async (resetPage = false) => {
+    // Reset to page 1 if requested (for new posts)
+    if (resetPage) {
+      setPage(1);
+    }
+    
+    // Always fetch posts (useEffect will handle it if page changed)
+    await fetchPosts();
+    
+    // Trigger stats refresh event for Header
+    window.dispatchEvent(new CustomEvent('refreshStats'));
+  };
 
+  // Fetch posts whenever filters, sort, or page changes
   useEffect(() => {
     fetchPosts();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, search, category, dateFrom, dateTo, firstName, lastName, sortBy]);
 
-  // Reset to page 1 when filters change
+  // Reset to page 1 when filters change (but not on initial load)
   useEffect(() => {
-    setPage(1);
-  }, [search, category, dateFrom, dateTo, firstName, lastName]);
-
-  // Filtering and searching
-  const filtered = posts.filter(post => {
-    // Post text search
-    const matchesSearch = !search || (post.text || "").toLowerCase().includes(search.toLowerCase());
-    
-    // Category filter
-    const matchesCategory = category === "All Categories" || (post.category || "") === category;
-    
-    // First name filter
-    const authorFirstName = post.author?.first_name || "";
-    const matchesFirstName = !firstName || authorFirstName.toLowerCase().includes(firstName.toLowerCase());
-    
-    // Last name filter
-    const authorLastName = post.author?.last_name || "";
-    const matchesLastName = !lastName || authorLastName.toLowerCase().includes(lastName.toLowerCase());
-    
-    // Date range filter
-    let matchesDateFrom = true;
-    let matchesDateTo = true;
-    
-    if (dateFrom || dateTo) {
-      const postDate = new Date(post.post_date);
-      if (!isNaN(postDate.getTime())) {
-        postDate.setHours(0, 0, 0, 0);
-        
-        if (dateFrom) {
-          const fromDate = new Date(dateFrom);
-          fromDate.setHours(0, 0, 0, 0);
-          matchesDateFrom = postDate >= fromDate;
-        }
-        
-        if (dateTo) {
-          const toDate = new Date(dateTo);
-          toDate.setHours(23, 59, 59, 999);
-          matchesDateTo = postDate <= toDate;
-        }
-      } else {
-        // If date is invalid, exclude from results if date filters are set
-        matchesDateFrom = false;
-        matchesDateTo = false;
-      }
+    if (page !== 1) {
+      setPage(1);
     }
-    
-    return matchesSearch && matchesCategory && matchesFirstName && matchesLastName && matchesDateFrom && matchesDateTo;
-  });
-
-  // Sorting
-  const sorted = filtered.sort((a, b) => {
-    switch (sortBy) {
-      case "Highest Engagement":
-        return b.total_engagements - a.total_engagements;
-      case "Most Liked":
-        return b.likes - a.likes;
-      case "Most Commented":
-        return b.comments - a.comments;
-      case "Most Recent":
-      default:
-        return new Date(b.post_date) - new Date(a.post_date);
-    }
-  });
-
-  // Pagination
-  const totalPages = Math.ceil(sorted.length / POSTS_PER_PAGE);
-  const paginated = sorted.slice((page - 1) * POSTS_PER_PAGE, page * POSTS_PER_PAGE);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, category, dateFrom, dateTo, firstName, lastName, sortBy]);
 
   return (
     <div className="App">
@@ -123,7 +100,7 @@ function App() {
           onClose={hideToast}
         />
       )}
-      <Header posts={posts} fetchPosts={fetchPosts} onSuccess={showToast} />
+      <Header fetchPosts={refreshAll} onSuccess={showToast} />
       <Filters
         search={search} setSearch={setSearch}
         category={category} setCategory={setCategory}
@@ -144,9 +121,9 @@ function App() {
         }}
       />
       <PostGrid 
-        posts={paginated} 
+        posts={posts} 
         loading={loading} 
-        fetchPosts={fetchPosts}
+        fetchPosts={refreshAll}
         onSuccess={showToast}
         onError={(msg) => showToast(msg, "error")}
       />
