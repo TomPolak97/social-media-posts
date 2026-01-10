@@ -5,10 +5,23 @@ import sqlite3
 import logging
 from datetime import datetime
 from db import create_connection
+from posts_routes_utils import (
+    build_where_clause,
+    get_order_by_clause,
+    row_to_post_dict,
+    get_or_create_author,
+    get_next_post_id,
+    build_author_update_fields,
+    build_post_update_fields,
+    validate_email_uniqueness,
+    post_exists,
+    get_post_author_id
+)
 
 router = APIRouter()
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+# Configure module-level logger
+_logger = logging.getLogger(__name__)
 
 
 # Pydantic models for request validation
@@ -48,7 +61,26 @@ def get_posts(
     last_name: Optional[str] = None,
     sort_by: str = "Most Recent"
 ):
-    """Get posts with pagination, filtering, and sorting - direct SQLite query"""
+    """
+    Get posts with pagination, filtering, and sorting.
+    
+    Args:
+        page: Page number (1-indexed)
+        per_page: Number of posts per page
+        search: Search term for post text or author name
+        category: Filter by category
+        date_from: Filter posts from this date
+        date_to: Filter posts until this date
+        first_name: Filter by author first name
+        last_name: Filter by author last name
+        sort_by: Sort option (Most Recent, Highest Engagement, Most Liked, Most Commented)
+        
+    Returns:
+        Dictionary with posts, pagination info, and totals
+        
+    Raises:
+        HTTPException: If database connection fails or query error occurs
+    """
     try:
         conn = create_connection()
         if conn is None:
@@ -56,45 +88,18 @@ def get_posts(
         
         c = conn.cursor()
         
-        # Build WHERE clause for filtering
-        where_conditions = []
-        params = []
+        # Build WHERE clause and ORDER BY clause using utilities
+        where_clause, params = build_where_clause(
+            search=search,
+            category=category,
+            date_from=date_from,
+            date_to=date_to,
+            first_name=first_name,
+            last_name=last_name
+        )
+        order_by = get_order_by_clause(sort_by)
         
-        if search:
-            where_conditions.append("(p.text LIKE ? OR a.first_name LIKE ? OR a.last_name LIKE ?)")
-            params.extend([f"%{search}%", f"%{search}%", f"%{search}%"])
-        
-        if category and category != "All Categories":
-            where_conditions.append("p.category = ?")
-            params.append(category)
-        
-        if date_from:
-            where_conditions.append("DATE(p.post_date) >= ?")
-            params.append(date_from)
-        
-        if date_to:
-            where_conditions.append("DATE(p.post_date) <= ?")
-            params.append(date_to)
-        
-        if first_name:
-            where_conditions.append("a.first_name LIKE ?")
-            params.append(f"%{first_name}%")
-        
-        if last_name:
-            where_conditions.append("a.last_name LIKE ?")
-            params.append(f"%{last_name}%")
-        
-        where_clause = " AND ".join(where_conditions) if where_conditions else "1=1"
-        
-        # Build ORDER BY clause
-        order_by = {
-            "Most Recent": "p.post_date DESC",
-            "Highest Engagement": "p.total_engagements DESC",
-            "Most Liked": "p.likes DESC",
-            "Most Commented": "p.comments DESC"
-        }.get(sort_by, "p.post_date DESC")
-        
-        # Get total count (for pagination)
+        # Get total count for pagination
         count_query = f"""
             SELECT COUNT(*) 
             FROM posts p
@@ -124,34 +129,11 @@ def get_posts(
         
         c.execute(query, params)
         rows = c.fetchall()
-        posts = []
-        for r in rows:
-            posts.append({
-                "id": r[0],
-                "text": r[1],
-                "post_date": r[2],
-                "likes": r[3],
-                "comments": r[4],
-                "shares": r[5],
-                "total_engagements": r[6],
-                "engagement_rate": r[7],
-                "svg_image": r[8],
-                "category": r[9],
-                "tags": r[10],
-                "location": r[11],
-                "author": {
-                    "first_name": r[12],
-                    "last_name": r[13],
-                    "email": r[14],
-                    "company": r[15],
-                    "job_title": r[16],
-                    "bio": r[17],
-                    "follower_count": r[18],
-                    "verified": bool(r[19])
-                }
-            })
         
-        logging.debug(f"Retrieved {len(posts)} posts (page {page}/{total_pages}, total: {total})")
+        # Convert rows to post dictionaries using utility function
+        posts = [row_to_post_dict(row) for row in rows]
+        
+        _logger.debug(f"Retrieved {len(posts)} posts (page {page}/{total_pages}, total: {total})")
         
         return {
             "posts": posts,
@@ -160,14 +142,24 @@ def get_posts(
             "per_page": per_page,
             "total_pages": total_pages
         }
+    except HTTPException:
+        raise
     except Exception as e:
-        logging.error(f"Error fetching posts: {e}", exc_info=True)
+        _logger.error(f"Error fetching posts: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
 @router.get("/posts/stats")
 def get_posts_stats():
-    """Get statistics for all posts (for header) - direct SQLite query"""
+    """
+    Get aggregate statistics for all posts (for header dashboard).
+    
+    Returns:
+        Dictionary with total_posts, total_likes, total_comments, avg_engagement_rate
+        
+    Raises:
+        HTTPException: If database connection fails or query error occurs
+    """
     try:
         conn = create_connection()
         if conn is None:
@@ -175,7 +167,7 @@ def get_posts_stats():
         
         c = conn.cursor()
         
-        # Get total posts, total likes, total comments, average engagement rate
+        # Get aggregate statistics
         c.execute("""
             SELECT 
                 COUNT(*) as total_posts,
@@ -186,6 +178,8 @@ def get_posts_stats():
         """)
         row = c.fetchone()
         
+        _logger.debug(f"Retrieved stats: {row[0]} posts, {row[1]} likes, {row[2]} comments")
+        
         return {
             "total_posts": row[0] or 0,
             "total_likes": row[1] or 0,
@@ -193,13 +187,27 @@ def get_posts_stats():
             "avg_engagement_rate": round(float(row[3] or 0), 1)
         }
     except Exception as e:
-        logging.error(f"Error fetching stats: {e}", exc_info=True)
+        _logger.error(f"Error fetching stats: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
 @router.post("/posts")
 def create_post(post_data: PostCreate):
-    """Create a new post - direct SQLite insert"""
+    """
+    Create a new post with author information.
+    
+    If author exists (by email), updates author info if provided.
+    If author doesn't exist, creates a new author.
+    
+    Args:
+        post_data: Post creation data including author and post information
+        
+    Returns:
+        Dictionary with created post ID and success message
+        
+    Raises:
+        HTTPException: If database error occurs or integrity constraint violated
+    """
     try:
         conn = create_connection()
         if conn is None:
@@ -207,62 +215,23 @@ def create_post(post_data: PostCreate):
         
         c = conn.cursor()
         
-        # Check if author exists by email, if not create one
-        c.execute("SELECT id FROM authors WHERE email = ?", (post_data.email,))
-        author_row = c.fetchone()
+        # Get or create author using utility function
+        author_id = get_or_create_author(
+            cursor=c,
+            email=post_data.email,
+            first_name=post_data.first_name,
+            last_name=post_data.last_name,
+            company=post_data.company,
+            job_title=post_data.job_title
+        )
         
-        if author_row:
-            author_id = author_row[0]
-            # Update author info if provided
-            update_fields = []
-            update_values = []
-            
-            if post_data.first_name:
-                update_fields.append("first_name = ?")
-                update_values.append(post_data.first_name)
-            if post_data.last_name:
-                update_fields.append("last_name = ?")
-                update_values.append(post_data.last_name)
-            if post_data.company:
-                update_fields.append("company = ?")
-                update_values.append(post_data.company)
-            if post_data.job_title:
-                update_fields.append("job_title = ?")
-                update_values.append(post_data.job_title)
-            
-            if update_fields:
-                update_values.append(author_id)
-                c.execute(f"""
-                    UPDATE authors 
-                    SET {', '.join(update_fields)}
-                    WHERE id = ?
-                """, update_values)
-        else:
-            # Create new author
-            c.execute("""
-                INSERT INTO authors (first_name, last_name, email, company, job_title, bio, follower_count, verified)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                post_data.first_name,
-                post_data.last_name,
-                post_data.email,
-                post_data.company,
-                post_data.job_title,
-                "",
-                0,
-                True
-            ))
-            author_id = c.lastrowid
-        
-        # Get the next post ID
-        c.execute("SELECT MAX(id) FROM posts")
-        max_id_result = c.fetchone()
-        next_id = (max_id_result[0] or 0) + 1
+        # Get next post ID using utility function
+        next_id = get_next_post_id(c)
         
         # Get current date/time
         post_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
-        # Insert the post directly to database
+        # Insert the post
         c.execute("""
             INSERT INTO posts (id, author_id, text, post_date, likes, comments, shares,
                               total_engagements, engagement_rate, svg_image, category, tags, location)
@@ -284,23 +253,40 @@ def create_post(post_data: PostCreate):
         ))
         
         conn.commit()
-        logging.info(f"Post created with ID: {next_id}")
+        _logger.info(f"Post created with ID: {next_id} for author ID: {author_id}")
         
         return {
             "id": next_id,
             "message": "Post created successfully"
         }
     except sqlite3.IntegrityError as e:
-        logging.error(f"Database integrity error: {e}", exc_info=True)
+        _logger.error(f"Database integrity error: {e}", exc_info=True)
         raise HTTPException(status_code=400, detail=f"Database error: {str(e)}")
+    except HTTPException:
+        raise
     except Exception as e:
-        logging.error(f"Error creating post: {e}", exc_info=True)
+        _logger.error(f"Error creating post: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
 @router.put("/posts/{post_id}")
 def update_post(post_id: int, post_data: PostUpdate):
-    """Update an existing post - direct SQLite update"""
+    """
+    Update an existing post and/or its author information.
+    
+    Only provided fields (not None) will be updated.
+    Empty strings for optional fields will clear them (set to NULL).
+    
+    Args:
+        post_id: ID of the post to update
+        post_data: Partial post data with fields to update
+        
+    Returns:
+        Dictionary with success message and post ID
+        
+    Raises:
+        HTTPException: If post not found, email conflict, or database error occurs
+    """
     try:
         conn = create_connection()
         if conn is None:
@@ -308,45 +294,33 @@ def update_post(post_id: int, post_data: PostUpdate):
         
         c = conn.cursor()
         
-        # Check if post exists
-        c.execute("SELECT id, author_id FROM posts WHERE id = ?", (post_id,))
-        post_row = c.fetchone()
-        
-        if not post_row:
+        # Check if post exists and get author ID
+        if not post_exists(c, post_id):
             raise HTTPException(status_code=404, detail=f"Post with ID {post_id} not found")
         
-        author_id = post_row[1]
+        author_id = get_post_author_id(c, post_id)
+        if author_id is None:
+            raise HTTPException(status_code=404, detail=f"Author not found for post {post_id}")
         
-        # Update author if author fields are provided
-        # In Pydantic: None = field not provided, empty string = field provided but empty
-        author_update_fields = []
-        author_update_values = []
+        # Get current email for validation
+        c.execute("SELECT email FROM authors WHERE id = ?", (author_id,))
+        current_email_row = c.fetchone()
+        current_email = current_email_row[0] if current_email_row else None
         
-        if post_data.first_name is not None:
-            author_update_fields.append("first_name = ?")
-            author_update_values.append(post_data.first_name)
-        if post_data.last_name is not None:
-            author_update_fields.append("last_name = ?")
-            author_update_values.append(post_data.last_name)
+        # Validate email uniqueness if email is being changed
         if post_data.email is not None:
-            # Check if email is already used by another author (only if email is being changed)
-            c.execute("SELECT email FROM authors WHERE id = ?", (author_id,))
-            current_email = c.fetchone()
-            if current_email and current_email[0] != post_data.email:
-                c.execute("SELECT id FROM authors WHERE email = ? AND id != ?", (post_data.email, author_id))
-                if c.fetchone():
-                    raise HTTPException(status_code=400, detail="Email already exists for another author")
-            author_update_fields.append("email = ?")
-            author_update_values.append(post_data.email)
-        if post_data.company is not None:
-            # Empty string means clear the field (set to NULL)
-            author_update_fields.append("company = ?")
-            author_update_values.append(post_data.company if post_data.company else None)
-        if post_data.job_title is not None:
-            # Empty string means clear the field (set to NULL)
-            author_update_fields.append("job_title = ?")
-            author_update_values.append(post_data.job_title if post_data.job_title else None)
+            validate_email_uniqueness(c, post_data.email, author_id, current_email)
         
+        # Build author update fields using utility function
+        author_update_fields, author_update_values = build_author_update_fields(
+            first_name=post_data.first_name,
+            last_name=post_data.last_name,
+            email=post_data.email,
+            company=post_data.company,
+            job_title=post_data.job_title
+        )
+        
+        # Update author if there are fields to update
         if author_update_fields:
             author_update_values.append(author_id)
             c.execute(f"""
@@ -354,31 +328,18 @@ def update_post(post_id: int, post_data: PostUpdate):
                 SET {', '.join(author_update_fields)}
                 WHERE id = ?
             """, author_update_values)
+            _logger.debug(f"Updated author {author_id} with {len(author_update_fields)} field(s)")
         
-        # Update post fields
-        post_update_fields = []
-        post_update_values = []
+        # Build post update fields using utility function
+        post_update_fields, post_update_values = build_post_update_fields(
+            text=post_data.text,
+            category=post_data.category,
+            svg_image=post_data.svg_image,
+            tags=post_data.tags,
+            location=post_data.location
+        )
         
-        if post_data.text is not None:
-            post_update_fields.append("text = ?")
-            post_update_values.append(post_data.text)
-        if post_data.category is not None:
-            # Empty string means clear the field (set to NULL)
-            post_update_fields.append("category = ?")
-            post_update_values.append(post_data.category if post_data.category else None)
-        if post_data.svg_image is not None:
-            # Empty string means clear the field (set to NULL)
-            post_update_fields.append("svg_image = ?")
-            post_update_values.append(post_data.svg_image if post_data.svg_image else None)
-        if post_data.tags is not None:
-            # Empty string means clear the field (set to NULL)
-            post_update_fields.append("tags = ?")
-            post_update_values.append(post_data.tags if post_data.tags else None)
-        if post_data.location is not None:
-            # Empty string means clear the field (set to NULL)
-            post_update_fields.append("location = ?")
-            post_update_values.append(post_data.location if post_data.location else None)
-        
+        # Update post if there are fields to update
         if post_update_fields:
             post_update_values.append(post_id)
             c.execute(f"""
@@ -386,9 +347,10 @@ def update_post(post_id: int, post_data: PostUpdate):
                 SET {', '.join(post_update_fields)}
                 WHERE id = ?
             """, post_update_values)
+            _logger.debug(f"Updated post {post_id} with {len(post_update_fields)} field(s)")
         
         conn.commit()
-        logging.info(f"Post {post_id} updated successfully")
+        _logger.info(f"Post {post_id} updated successfully")
         
         return {
             "message": "Post updated successfully",
@@ -397,13 +359,24 @@ def update_post(post_id: int, post_data: PostUpdate):
     except HTTPException:
         raise
     except Exception as e:
-        logging.error(f"Error updating post: {e}", exc_info=True)
+        _logger.error(f"Error updating post: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
 @router.delete("/posts/{post_id}")
 def delete_post(post_id: int):
-    """Delete a post - direct SQLite delete"""
+    """
+    Delete a post by ID.
+    
+    Args:
+        post_id: ID of the post to delete
+        
+    Returns:
+        Dictionary with success message and deleted post ID
+        
+    Raises:
+        HTTPException: If post not found or database error occurs
+    """
     try:
         conn = create_connection()
         if conn is None:
@@ -411,18 +384,15 @@ def delete_post(post_id: int):
         
         c = conn.cursor()
         
-        # Check if post exists
-        c.execute("SELECT id FROM posts WHERE id = ?", (post_id,))
-        post = c.fetchone()
-        
-        if not post:
+        # Check if post exists using utility function
+        if not post_exists(c, post_id):
             raise HTTPException(status_code=404, detail=f"Post with ID {post_id} not found")
         
-        # Delete the post directly from database
+        # Delete the post
         c.execute("DELETE FROM posts WHERE id = ?", (post_id,))
         conn.commit()
         
-        logging.info(f"Post {post_id} deleted successfully")
+        _logger.info(f"Post {post_id} deleted successfully")
         
         return {
             "message": "Post deleted successfully",
@@ -431,5 +401,5 @@ def delete_post(post_id: int):
     except HTTPException:
         raise
     except Exception as e:
-        logging.error(f"Error deleting post: {e}", exc_info=True)
+        _logger.error(f"Error deleting post: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
