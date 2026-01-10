@@ -1,7 +1,7 @@
 import { useState } from "react";
 import axios from "axios";
 
-export default function PostForm({ closeForm, fetchPosts }) {
+export default function PostForm({ closeForm, fetchPosts, onSuccess }) {
   const [text, setText] = useState("");
   const [category, setCategory] = useState("Product");
 
@@ -11,6 +11,11 @@ export default function PostForm({ closeForm, fetchPosts }) {
       await axios.post("http://127.0.0.1:8000/posts", { post_text: text, post_category: category });
       fetchPosts();
       closeForm();
+      
+      // Show success notification
+      if (onSuccess) {
+        onSuccess("Post added successfully! ✓");
+      }
     } catch (err) {
       console.error("Add post failed:", err);
     }

@@ -36,3 +36,20 @@ def health():
 
 # Include posts endpoints
 app.include_router(posts_router)
+
+# Run the server if this file is executed directly
+if __name__ == "__main__":
+    import uvicorn
+    import os
+    import sys
+    
+    # Disable reload when running in PyCharm debugger or when explicitly requested
+    # Reload doesn't work well with debuggers
+    use_reload = "--no-reload" not in sys.argv and "pydevd" not in sys.modules
+    
+    if use_reload:
+        # Use import string format for reload to work
+        uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    else:
+        # Direct app object when not using reload (works better with debuggers)
+        uvicorn.run(app, host="0.0.0.0", port=8000, reload=False)

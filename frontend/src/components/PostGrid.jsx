@@ -1,7 +1,7 @@
 import PostCard from "./PostCard";
 import SkeletonCard from "./SkeletonCard";
 
-export default function PostGrid({ posts, loading, fetchPosts }) {
+export default function PostGrid({ posts, loading, fetchPosts, onSuccess, onError }) {
   if (loading) {
     return (
       <div className="post-grid">
@@ -15,7 +15,13 @@ export default function PostGrid({ posts, loading, fetchPosts }) {
   return (
     <div className="post-grid">
       {posts.map((post) => (
-        <PostCard key={post.id} post={post} fetchPosts={fetchPosts} />
+        <PostCard 
+          key={post.id} 
+          post={post} 
+          fetchPosts={fetchPosts}
+          onSuccess={onSuccess}
+          onError={onError}
+        />
       ))}
     </div>
   );
