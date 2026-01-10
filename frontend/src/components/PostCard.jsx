@@ -2,6 +2,15 @@ import axios from "axios";
 
 export default function PostCard({ post, fetchPosts, onSuccess, onError }) {
   const handleDelete = async () => {
+    // Confirm deletion
+    const confirmed = window.confirm(
+      `Are you sure you want to delete this post?\n\n"${(post.text || "").substring(0, 50)}${(post.text || "").length > 50 ? "..." : ""}"`
+    );
+    
+    if (!confirmed) {
+      return;
+    }
+
     try {
       await axios.delete(`http://127.0.0.1:8000/posts/${post.id}`);
       fetchPosts();
